@@ -54,6 +54,10 @@ class NeuSSystem(BaseSystem):
             rays_o, rays_d = get_rays(directions, c2w)
             rgb = self.dataset.all_images[index, y, x].view(-1, self.dataset.all_images.shape[-1]).to(self.rank)
             fg_mask = self.dataset.all_fg_masks[index, y, x].view(-1).to(self.rank)
+            if hasattr(self.dataset, 'all_normals'):
+                normals = self.dataset.all_normals[index, y, x].view(-1, 3).to(self.rank)
+            if hasattr(self.dataset, 'all_depths'):
+                depths = self.dataset.all_depths[index, y, x].view(-1, 1).to(self.rank)
         else:
             c2w = self.dataset.all_c2w[index][0]
             if self.dataset.directions.ndim == 3: # (H, W, 3)
@@ -63,6 +67,10 @@ class NeuSSystem(BaseSystem):
             rays_o, rays_d = get_rays(directions, c2w)
             rgb = self.dataset.all_images[index].view(-1, self.dataset.all_images.shape[-1]).to(self.rank)
             fg_mask = self.dataset.all_fg_masks[index].view(-1).to(self.rank)
+            if hasattr(self.dataset, 'all_normals'):
+                normals = self.dataset.all_normals[index].view(-1, 3).to(self.rank)
+            if hasattr(self.dataset, 'all_depths'):
+                depths = self.dataset.all_depths[index].view(-1, 1).to(self.rank)
 
         rays = torch.cat([rays_o, F.normalize(rays_d, p=2, dim=-1)], dim=-1)
 
@@ -83,8 +91,18 @@ class NeuSSystem(BaseSystem):
             'rays': rays,
             'rgb': rgb,
             'fg_mask': fg_mask
-        })      
-    
+        })
+
+        if hasattr(self.dataset, 'all_normals'):
+            batch.update({
+                'normals': normals,
+            })
+        
+        if hasattr(self.dataset, 'all_depths'):
+            batch.update({
+                'depths': depths,
+            })
+        
     def training_step(self, batch, batch_idx):
         out = self(batch)
 
@@ -94,6 +112,42 @@ class NeuSSystem(BaseSystem):
         if self.config.model.dynamic_ray_sampling:
             train_num_rays = int(self.train_num_rays * (self.train_num_samples / out['num_samples_full'].sum().item()))        
             self.train_num_rays = min(int(self.train_num_rays * 0.9 + train_num_rays * 0.1), self.config.model.max_train_num_rays)
+
+        # depth scale-invariant loss
+        if self.C(self.config.system.loss.lambda_depth) > 0 and 'depth' in out and 'depths' in batch:
+            pred_depth = out['depth']  # Ensure 1D: [N]
+            gt_depth = batch['depths']   # Ensure 1D: [N]
+
+            mask = gt_depth != 1e10  # Ignore infinite depths
+
+            if self.config.system.loss.scale_depth:
+                with torch.no_grad():
+                    pred_depth_valid = pred_depth[mask]
+                    gt_depth_valid = gt_depth[mask]
+                    A_matrix = torch.stack([pred_depth_valid, torch.ones_like(pred_depth_valid)], dim=-1)  # [N, 2]
+                    scale_params = torch.linalg.lstsq(A_matrix, gt_depth_valid)[0]  # [2]
+            else:
+                scale_params = torch.tensor([1.0, 0.0], device=self.rank)  # No scaling
+            
+            pred_depth_scaled = pred_depth * scale_params[0] + scale_params[1]
+            loss_depth = F.mse_loss(pred_depth_scaled * mask, gt_depth * mask)
+            
+            self.log('train/loss_depth', loss_depth)
+            loss += loss_depth * self.C(self.config.system.loss.lambda_depth)
+
+        # normal loss l1
+        if self.C(self.config.system.loss.lambda_normal_l1) > 0 and 'comp_normal' in out and 'normals' in batch:
+            mask = (batch['depths'] != 1e10).squeeze() if 'depths' in batch else torch.ones_like(out['comp_normal'][..., 0], dtype=torch.bool)
+            loss_normal_l1 = torch.abs(out['comp_normal'][mask] - batch['normals'][mask]).sum(dim=-1).mean()
+            self.log('train/loss_normal_l1', loss_normal_l1)
+            loss += loss_normal_l1 * self.C(self.config.system.loss.lambda_normal_l1)
+
+        # normal loss cos
+        if self.C(self.config.system.loss.lambda_normal_cos) > 0 and 'comp_normal' in out and 'normals' in batch:
+            mask = (batch['depths'] != 1e10).squeeze() if 'depths' in batch else torch.ones_like(out['comp_normal'][..., 0], dtype=torch.bool)
+            loss_normal_cos = (1.0 - torch.sum(out['comp_normal'][mask] * batch['normals'][mask], dim = -1)).mean()
+            self.log('train/loss_normal_cos', loss_normal_cos)
+            loss += loss_normal_cos * self.C(self.config.system.loss.lambda_normal_cos)
 
         loss_rgb_mse = F.mse_loss(out['comp_rgb_full'][out['rays_valid_full'][...,0]], batch['rgb'][out['rays_valid_full'][...,0]])
         self.log('train/loss_rgb_mse', loss_rgb_mse)
@@ -180,8 +234,16 @@ class NeuSSystem(BaseSystem):
             {'type': 'rgb', 'img': out['comp_rgb'].view(H, W, 3), 'kwargs': {'data_format': 'HWC'}},
         ] if self.config.model.learned_background else []) + [
             {'type': 'grayscale', 'img': out['depth'].view(H, W), 'kwargs': {}},
-            {'type': 'rgb', 'img': out['comp_normal'].view(H, W, 3), 'kwargs': {'data_format': 'HWC', 'data_range': (-1, 1)}}
-        ])
+        ] + ([
+            {'type': 'grayscale', 'img': batch['depths'].view(H, W), 'kwargs': {}},
+        ] if 'depths' in batch else []) + [
+            {'type': 'rgb', 'img': out['comp_normal'].view(H, W, 3), 'kwargs': {'data_format': 'HWC', 'data_range': (-1, 1)}},
+        ] + ([
+            {'type': 'rgb', 'img': batch['normals'].view(H, W, 3), 'kwargs': {'data_format': 'HWC', 'data_range': (-1, 1)}}
+        ] if 'normals' in batch else [])
+        )
+        print(batch['depths'].max(), batch['depths'].min(), out['depth'].max(), out['depth'].min())
+
         return {
             'psnr': psnr,
             'index': batch['index']
@@ -250,7 +312,7 @@ class NeuSSystem(BaseSystem):
             self.save_img_sequence(
                 f"it{self.global_step}-test",
                 f"it{self.global_step}-test",
-                '(\d+)\.png',
+                r'(\d+)\.png',
                 save_format='mp4',
                 fps=30
             )
