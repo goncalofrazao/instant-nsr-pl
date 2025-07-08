@@ -26,10 +26,12 @@ def load_exr_image(filepath):
     height = dw.max.y - dw.min.y + 1
     
     # Read RGB channels
-    channels = exr_file.channels(['R', 'G', 'B'])
+    if 'depth' in filepath:
+        channels = exr_file.channels(['R', 'G', 'B'])
+    elif 'normal' in filepath:
+        channels = exr_file.channels(['X', 'Y', 'Z'])
     
     # Convert to numpy array
-    
     rgb_data = []
     for channel in channels:
         channel_data = array.array('f', channel)
@@ -38,19 +40,14 @@ def load_exr_image(filepath):
     # Reshape to image dimensions
     rgb_array = np.stack(rgb_data, axis=-1)
     rgb_array = rgb_array.reshape(height, width, 3)
-    rgb_array = rgb_array.mean(axis=-1)  # Convert to grayscale if needed
 
-    rgb_array[rgb_array == 1e10] = 0
+    if 'depth' in filepath:
+        rgb_array = rgb_array.mean(axis=-1)  # Convert to grayscale if needed
+        rgb_array[rgb_array == 1e10] = 0
+
     
     exr_file.close()
     return torch.from_numpy(rgb_array)
-
-def load_normal_image(filepath):
-    img = Image.open(filepath)
-    img = img.convert('RGB')  # Ensure it's in RGB format
-    img = np.array(img).astype(np.float32) / 255.0  # Normalize to [0, 1]
-    img = img * 2.0 - 1.0  # Scale to [-1, 1]
-    return torch.from_numpy(img)  # Return as a numpy array (H, W, 3) in [-1, 1] range
 
 class BlenderCuesDatasetBase():
     def setup(self, config, split):
@@ -106,10 +103,9 @@ class BlenderCuesDatasetBase():
             depth_path = os.path.join(self.config.root_dir, f"{frame['file_path']}_depth.exr")
             self.all_depths.append(load_exr_image(depth_path))
 
-            normal_path = os.path.join(self.config.root_dir, f"{frame['file_path']}_normal.png")
-            self.all_normals.append(load_normal_image(normal_path))
-            
-            self.all_fg_masks[-1] = (self.all_depths[-1] != self.all_depths[-1].max()).float()
+            normal_path = os.path.join(self.config.root_dir, f"{frame['file_path']}_normal.exr")
+            normals = load_exr_image(normal_path)
+            self.all_normals.append(normals)
 
         if self.config.get('num_views', False):
             num_views = self.config.num_views
