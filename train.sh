@@ -8,9 +8,9 @@
 CONFIG="configs/neus-blender.yaml"
 DATASET_NAME="blendercues"
 SCENE="lego2"
-TAG="debug"
-VAL_INTERVAL=500
-MAX_STEPS=2000
+TAG="nocues_100views"
+VAL_INTERVAL=5000
+MAX_STEPS=20000
 NORMAL_LOSS=0.0
 DEPTH_LOSS=0.0
 NUM_VIEWS=100

@@ -43,8 +43,6 @@ def load_exr_image(filepath):
 
     if 'depth' in filepath:
         rgb_array = rgb_array.mean(axis=-1)  # Convert to grayscale if needed
-        rgb_array[rgb_array == 1e10] = 0
-
     
     exr_file.close()
     return torch.from_numpy(rgb_array)
