@@ -105,7 +105,7 @@ class BlenderCuesDatasetBase():
             normals = load_exr_image(normal_path)
             self.all_normals.append(normals)
 
-        if self.config.get('num_views', False):
+        if split == 'train' and self.config.get('num_views', False):
             num_views = self.config.num_views
             jump = len(self.all_c2w) // num_views
             if jump == 0:
