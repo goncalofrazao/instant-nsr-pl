@@ -226,6 +226,9 @@ class NeuSSystem(BaseSystem):
         out = self(batch)
         psnr = self.criterions['psnr'](out['comp_rgb_full'].to(batch['rgb']), batch['rgb'])
         W, H = self.dataset.img_wh
+        if 'depths' in batch:
+            depths = batch['depths'].clone().view(H, W)
+            depths[depths == depths.max()] = 0.0
         self.save_image_grid(f"it{self.global_step}-{batch['index'][0].item()}.png", [
             {'type': 'rgb', 'img': batch['rgb'].view(H, W, 3), 'kwargs': {'data_format': 'HWC'}},
             {'type': 'rgb', 'img': out['comp_rgb_full'].view(H, W, 3), 'kwargs': {'data_format': 'HWC'}}
@@ -235,7 +238,7 @@ class NeuSSystem(BaseSystem):
         ] if self.config.model.learned_background else []) + [
             {'type': 'grayscale', 'img': out['depth'].view(H, W), 'kwargs': {}},
         ] + ([
-            {'type': 'grayscale', 'img': batch['depths'].view(H, W), 'kwargs': {}},
+            {'type': 'grayscale', 'img': depths, 'kwargs': {}},
         ] if 'depths' in batch else []) + [
             {'type': 'rgb', 'img': out['comp_normal'].view(H, W, 3), 'kwargs': {'data_format': 'HWC', 'data_range': (-1, 1)}},
         ] + ([
