@@ -230,7 +230,8 @@ class NeuSModel(BaseModel):
             sdf, sdf_grad, feature, sdf_laplace = self.geometry(positions, with_grad=True, with_feature=True, with_laplace=True)
         else:
             sdf, sdf_grad, feature = self.geometry(positions, with_grad=True, with_feature=True)
-        normal = F.normalize(sdf_grad, p=2, dim=-1)
+        # normal = F.normalize(sdf_grad, p=2, dim=-1)
+        normal = sdf_grad
         alpha = self.get_alpha(sdf, normal, t_dirs, dists)[...,None]
         rgb = self.texture(feature, t_dirs, normal)
 
@@ -240,7 +241,7 @@ class NeuSModel(BaseModel):
         comp_rgb = accumulate_along_rays(weights, ray_indices, values=rgb, n_rays=n_rays)
 
         comp_normal = accumulate_along_rays(weights, ray_indices, values=normal, n_rays=n_rays)
-        comp_normal = F.normalize(comp_normal, p=2, dim=-1)
+        # comp_normal = F.normalize(comp_normal, p=2, dim=-1)
 
         out = {
             'comp_rgb': comp_rgb,
