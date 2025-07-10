@@ -84,7 +84,7 @@ class BlenderCuesDatasetBase():
             get_ray_directions(self.w, self.h, self.focal, self.focal, self.w//2, self.h//2).to(self.rank) # (h, w, 3)           
 
         self.all_c2w, self.all_images, self.all_fg_masks = [], [], []
-        self.all_normals, self.all_depths = [], []
+        self.all_normals, self.all_depths, self.all_masks = [], [], []
 
         for i, frame in enumerate(meta['frames']):
             c2w = torch.from_numpy(np.array(frame['transform_matrix'])[:3, :4])
@@ -99,11 +99,15 @@ class BlenderCuesDatasetBase():
             self.all_images.append(img[...,:3])
 
             depth_path = os.path.join(self.config.root_dir, f"{frame['file_path']}_depth.exr")
-            self.all_depths.append(load_exr_image(depth_path))
+            depth = load_exr_image(depth_path)
+            self.all_depths.append(depth)
 
             normal_path = os.path.join(self.config.root_dir, f"{frame['file_path']}_normal.exr")
             normals = load_exr_image(normal_path)
             self.all_normals.append(normals)
+
+            mask = (depth != 1e10) & (torch.linalg.norm(normals, dim=-1) > 0.9)
+            self.all_masks.append(mask)
 
         if split == 'train' and self.config.get('num_views', False):
             num_views = self.config.num_views
@@ -115,6 +119,7 @@ class BlenderCuesDatasetBase():
             self.all_fg_masks = self.all_fg_masks[::jump]
             self.all_depths = self.all_depths[::jump]
             self.all_normals = self.all_normals[::jump]
+            self.all_masks = self.all_masks[::jump]
 
         self.all_c2w, self.all_images, self.all_fg_masks = \
             torch.stack(self.all_c2w, dim=0).float().to(self.rank), \
@@ -123,6 +128,7 @@ class BlenderCuesDatasetBase():
         
         self.all_depths = torch.stack(self.all_depths, dim=0).float().to(self.rank)
         self.all_normals = torch.stack(self.all_normals, dim=0).float().to(self.rank)
+        self.all_masks = torch.stack(self.all_masks, dim=0).to(self.rank)
         
 
 class BlenderCuesDataset(Dataset, BlenderCuesDatasetBase):

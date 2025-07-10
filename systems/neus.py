@@ -58,6 +58,8 @@ class NeuSSystem(BaseSystem):
                 normals = self.dataset.all_normals[index, y, x].view(-1, 3).to(self.rank)
             if hasattr(self.dataset, 'all_depths'):
                 depths = self.dataset.all_depths[index, y, x].view(-1, 1).to(self.rank)
+            if hasattr(self.dataset, 'all_masks'):
+                mask = self.dataset.all_masks[index, y, x].view(-1).to(self.rank)
         else:
             c2w = self.dataset.all_c2w[index][0]
             if self.dataset.directions.ndim == 3: # (H, W, 3)
@@ -71,6 +73,8 @@ class NeuSSystem(BaseSystem):
                 normals = self.dataset.all_normals[index].view(-1, 3).to(self.rank)
             if hasattr(self.dataset, 'all_depths'):
                 depths = self.dataset.all_depths[index].view(-1, 1).to(self.rank)
+            if hasattr(self.dataset, 'all_masks'):
+                mask = self.dataset.all_masks[index].view(-1).to(self.rank)
 
         rays = torch.cat([rays_o, F.normalize(rays_d, p=2, dim=-1)], dim=-1)
 
@@ -103,6 +107,11 @@ class NeuSSystem(BaseSystem):
                 'depths': depths,
             })
         
+        if hasattr(self.dataset, 'all_masks'):
+            batch.update({
+                'mask': mask,
+            })
+        
     def training_step(self, batch, batch_idx):
         out = self(batch)
 
@@ -117,8 +126,8 @@ class NeuSSystem(BaseSystem):
         if self.C(self.config.system.loss.lambda_depth) > 0 and 'depth' in out and 'depths' in batch:
             pred_depth = out['depth']  # Ensure 1D: [N]
             gt_depth = batch['depths']   # Ensure 1D: [N]
-
-            mask = gt_depth != 1e10  # Ignore infinite depths
+            
+            mask = batch['mask'].unsqueeze(-1)
 
             if self.config.system.loss.scale_depth:
                 with torch.no_grad():
@@ -137,14 +146,14 @@ class NeuSSystem(BaseSystem):
 
         # normal loss l1
         if self.C(self.config.system.loss.lambda_normal_l1) > 0 and 'comp_normal' in out and 'normals' in batch:
-            mask = (batch['depths'] != 1e10).squeeze() if 'depths' in batch else torch.ones_like(out['comp_normal'][..., 0], dtype=torch.bool)
+            mask = batch['mask']
             loss_normal_l1 = torch.abs(out['comp_normal'][mask] - batch['normals'][mask]).sum(dim=-1).mean()
             self.log('train/loss_normal_l1', loss_normal_l1)
             loss += loss_normal_l1 * self.C(self.config.system.loss.lambda_normal_l1)
 
         # normal loss cos
         if self.C(self.config.system.loss.lambda_normal_cos) > 0 and 'comp_normal' in out and 'normals' in batch:
-            mask = (batch['depths'] != 1e10).squeeze() if 'depths' in batch else torch.ones_like(out['comp_normal'][..., 0], dtype=torch.bool)
+            mask = batch['mask']
             loss_normal_cos = (1.0 - torch.sum(out['comp_normal'][mask] * batch['normals'][mask], dim = -1)).mean()
             self.log('train/loss_normal_cos', loss_normal_cos)
             loss += loss_normal_cos * self.C(self.config.system.loss.lambda_normal_cos)
