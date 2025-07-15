@@ -131,7 +131,7 @@ class NeuSSystem(BaseSystem):
 
             if self.config.system.loss.scale_depth:
                 with torch.no_grad():
-                    pred_depth_valid = pred_depth[mask]
+                    pred_depth_valid = pred_depth[mask].squeeze()
                     gt_depth_valid = gt_depth[mask]
                     A_matrix = torch.stack([pred_depth_valid, torch.ones_like(pred_depth_valid)], dim=-1)  # [N, 2]
                     scale_params = torch.linalg.lstsq(A_matrix, gt_depth_valid)[0]  # [2]
