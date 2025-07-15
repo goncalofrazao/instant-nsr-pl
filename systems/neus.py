@@ -127,7 +127,7 @@ class NeuSSystem(BaseSystem):
             pred_depth = out['depth']  # Ensure 1D: [N]
             gt_depth = batch['depths']   # Ensure 1D: [N]
             
-            mask = batch['mask'].unsqueeze(-1)
+            mask = batch['mask']
 
             if self.config.system.loss.scale_depth:
                 with torch.no_grad():
@@ -139,7 +139,7 @@ class NeuSSystem(BaseSystem):
                 scale_params = torch.tensor([1.0, 0.0], device=self.rank)  # No scaling
             
             pred_depth_scaled = pred_depth * scale_params[0] + scale_params[1]
-            loss_depth = F.mse_loss(pred_depth_scaled * mask, gt_depth * mask)
+            loss_depth = F.mse_loss(pred_depth_scaled[mask], gt_depth[mask])
             
             self.log('train/loss_depth', loss_depth)
             loss += loss_depth * self.C(self.config.system.loss.lambda_depth)

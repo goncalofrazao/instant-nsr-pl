@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 import OpenEXR
 import array
+import cv2
 
 import torch
 from torch.utils.data import Dataset, DataLoader, IterableDataset
@@ -16,7 +17,28 @@ import datasets
 from models.ray_utils import get_ray_directions
 from utils.misc import get_rank
 
-def load_exr_image(filepath):
+def read_moge_depth(filepath):
+    exr_file = OpenEXR.InputFile(filepath)
+    header = exr_file.header()
+    dw = header['dataWindow']
+    width = dw.max.x - dw.min.x + 1
+    height = dw.max.y - dw.min.y + 1
+    depth_str = exr_file.channel('Y')
+    depth = np.frombuffer(depth_str, dtype=np.float32)
+    depth = depth.reshape((height, width))
+    exr_file.close()
+    return torch.from_numpy(depth)
+
+def read_moge_normal(filepath, c2w):
+    normal_c = torch.from_numpy((cv2.cvtColor(cv2.imread(filepath), cv2.COLOR_BGR2RGB) / 127.5 - 1).clip(-1, 1)).float()
+    normal_w = (c2w.float()[None, None, :3, :3] @ normal_c[:, :, :, None]).squeeze()
+    return normal_w
+
+def read_moge_mask(filepath):
+    mask = cv2.imread(filepath)[:, :, 0] > 0
+    return torch.from_numpy(mask)
+
+def read_gt(filepath):
     exr_file = OpenEXR.InputFile(filepath)
     header = exr_file.header()
     
@@ -98,15 +120,18 @@ class BlenderCuesDatasetBase():
             self.all_fg_masks.append(img[..., -1]) # (h, w)
             self.all_images.append(img[...,:3])
 
-            depth_path = os.path.join(self.config.root_dir, f"{frame['file_path']}_depth.exr")
-            depth = load_exr_image(depth_path)
+            if self.config.cues == 'moge':
+                base_path = f'{self.config.root_dir}/{frame["file_path"]}'
+                depth = read_moge_depth(f'{base_path}/depth.exr')
+                normals = read_moge_normal(f'{base_path}/normal.png', c2w)
+                mask = read_moge_mask(f'{base_path}/mask.png')
+            else:
+                depth = read_gt(f"{self.config.root_dir}/{frame['file_path']}_depth.exr")
+                normals = read_gt(f"{self.config.root_dir}/{frame['file_path']}_normal.exr")
+                mask = (depth != 1e10) & (torch.linalg.norm(normals, dim=-1) > 0.9)
+                
             self.all_depths.append(depth)
-
-            normal_path = os.path.join(self.config.root_dir, f"{frame['file_path']}_normal.exr")
-            normals = load_exr_image(normal_path)
             self.all_normals.append(normals)
-
-            mask = (depth != 1e10) & (torch.linalg.norm(normals, dim=-1) > 0.9)
             self.all_masks.append(mask)
 
         if split == 'train' and self.config.get('num_views', False):
