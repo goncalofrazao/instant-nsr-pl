@@ -9,11 +9,10 @@ CONFIG="configs/neus-blender.yaml"
 DATASET_NAME="blendercues"
 DATSET_CUES="moge"
 SCENE="lego3"
-VAL_INTERVAL=500
-MAX_STEPS=1000
+VAL_INTERVAL=10000
+MAX_STEPS=20000
 NUM_VIEWS=100
-# TAG="cues_${NUM_VIEWS}views"
-TAG="debug"
+TAG="cues_${NUM_VIEWS}views"
 
 python launch.py \
         --config "$CONFIG" \
@@ -25,6 +24,7 @@ python launch.py \
         dataset.name="$DATASET_NAME" \
         dataset.cues="$DATSET_CUES" \
         dataset.num_views=$NUM_VIEWS \
+        model.radius=0.7 \
         system.loss.lambda_normal_l1=0.5 \
         system.loss.lambda_normal_cos=0.5 \
         system.loss.lambda_depth=1.0 \

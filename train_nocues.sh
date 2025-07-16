@@ -24,7 +24,8 @@ python launch.py \
         dataset.name="$DATASET_NAME" \
         dataset.cues="$DATSET_CUES" \
         dataset.num_views=$NUM_VIEWS \
+        model.radius=0.7 \
         system.loss.lambda_normal_l1=0.0 \
         system.loss.lambda_normal_cos=0.0 \
         system.loss.lambda_depth=0.0 \
-        system.loss.scale_depth=false \
+        system.loss.scale_depth=true \
