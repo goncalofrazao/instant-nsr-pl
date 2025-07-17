@@ -124,23 +124,23 @@ class NeuSSystem(BaseSystem):
 
         # depth scale-invariant loss
         if self.C(self.config.system.loss.lambda_depth) > 0 and 'depth' in out and 'depths' in batch:
-            pred_depth = out['depth']  # Ensure 1D: [N]
-            gt_depth = batch['depths']   # Ensure 1D: [N]
+            pred_depth = out['depth'].squeeze()  # Ensure 1D: [N]
+            gt_depth = batch['depths'].squeeze()   # Ensure 1D: [N]
             
             mask = batch['mask']
 
+            x = pred_depth[mask]
+            y = gt_depth[mask]
+
             if self.config.system.loss.scale_depth:
                 with torch.no_grad():
-                    pred_depth_valid = pred_depth[mask].squeeze()
-                    gt_depth_valid = gt_depth[mask]
-                    A_matrix = torch.stack([pred_depth_valid, torch.ones_like(pred_depth_valid)], dim=-1)  # [N, 2]
-                    scale_params = torch.linalg.lstsq(A_matrix, gt_depth_valid)[0]  # [2]
+                    a = torch.stack([x, torch.ones_like(x)], dim=-1)  # [N, 2]
+                    scale, shift = torch.linalg.lstsq(a, y)[0]  # [2]
             else:
-                scale_params = torch.tensor([1.0, 0.0], device=self.rank)  # No scaling
-            
-            pred_depth_scaled = pred_depth * scale_params[0] + scale_params[1]
-            loss_depth = F.mse_loss(pred_depth_scaled[mask], gt_depth[mask])
-            
+                scale, shift = torch.tensor([1.0, 0.0], device=self.rank)  # No scaling
+
+            loss_depth = F.mse_loss(x * scale + shift, y)
+
             self.log('train/loss_depth', loss_depth)
             loss += loss_depth * self.C(self.config.system.loss.lambda_depth)
 

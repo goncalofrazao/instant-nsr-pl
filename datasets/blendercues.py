@@ -24,7 +24,7 @@ def read_moge_depth(filepath):
     width = dw.max.x - dw.min.x + 1
     height = dw.max.y - dw.min.y + 1
     depth_str = exr_file.channel('Y')
-    depth = np.frombuffer(depth_str, dtype=np.float32)
+    depth = np.frombuffer(depth_str, dtype=np.float32).copy()
     depth = depth.reshape((height, width))
     exr_file.close()
     return torch.from_numpy(depth)
@@ -125,6 +125,10 @@ class BlenderCuesDatasetBase():
                 depth = read_moge_depth(f'{base_path}/depth.exr')
                 normals = read_moge_normal(f'{base_path}/normal.png', c2w)
                 mask = read_moge_mask(f'{base_path}/mask.png')
+
+                depth_min = depth[mask].min()
+                depth_max = depth[mask].max()
+                depth[mask] = 1 + (depth[mask] - depth_min) / (depth_max - depth_min)
             else:
                 depth = read_gt(f"{self.config.root_dir}/{frame['file_path']}_depth.exr")
                 normals = read_gt(f"{self.config.root_dir}/{frame['file_path']}_normal.exr")
